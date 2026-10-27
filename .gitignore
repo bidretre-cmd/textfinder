@@ -1,0 +1,18 @@
+# Cache & Data files
+.tf_cache/
+hasil_*.txt
+*.txt
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+venv/
+.venv/
+
+# Flet & Flutter Build
+build/
+dist/
+.flet/

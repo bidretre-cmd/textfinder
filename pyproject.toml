@@ -1,0 +1,18 @@
+[project]
+name = "textfinder"
+version = "1.0.0"
+description = "Text Finder & Cookie / Credential Sorter for Android"
+authors = [{ name = "Antibosan" }]
+dependencies = [
+    "flet>=1.0.0",
+]
+
+[tool.flet.app]
+module = "main"
+
+[tool.flet.android]
+permissions = [
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.WRITE_EXTERNAL_STORAGE",
+    "android.permission.MANAGE_EXTERNAL_STORAGE",
+]

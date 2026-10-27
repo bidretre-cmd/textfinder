@@ -1,0 +1,51 @@
+name: Build Android APK (Flet)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet
+
+      - name: Build APK with Flet
+        run: |
+          flet build apk \
+            --project-name textfinder \
+            --build-version 1.0.0 \
+            --build-number 1 \
+            --android-permissions android.permission.READ_EXTERNAL_STORAGE=true android.permission.WRITE_EXTERNAL_STORAGE=true android.permission.MANAGE_EXTERNAL_STORAGE=true \
+            --yes
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TextFinder-APK
+          path: build/apk/*.apk
