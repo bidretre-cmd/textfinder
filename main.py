@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+import asyncio
 from datetime import datetime
 import flet as ft
 
@@ -18,6 +19,21 @@ from text_finder_core import (
     extract_cookie_domain,
     extract_cred_domain
 )
+
+# ── Flet 0.x / 1.0+ Compatibility Layer ──
+if not hasattr(ft, "ElevatedButton"):
+    ft.ElevatedButton = getattr(ft, "Button", getattr(ft, "FilledButton", None))
+
+if hasattr(ft, "Padding"):
+    for _attr in ["symmetric", "only", "all", "zero"]:
+        if hasattr(ft.Padding, _attr) and not hasattr(ft.padding, _attr):
+            setattr(ft.padding, _attr, getattr(ft.Padding, _attr))
+
+if hasattr(ft, "Margin"):
+    for _attr in ["symmetric", "only", "all", "zero"]:
+        if hasattr(ft.Margin, _attr) and not hasattr(ft.margin, _attr):
+            setattr(ft.margin, _attr, getattr(ft.Margin, _attr))
+
 
 
 def main(page: ft.Page):
@@ -54,7 +70,16 @@ def main(page: ft.Page):
 
     # Setup Clipboard helper
     clipboard = ft.Clipboard()
-    page.overlay.append(clipboard)
+
+    # ── Safe UI Update (Thread-safe for Flet 1.0) ──
+    def safe_update():
+        try:
+            if hasattr(page, "schedule_update"):
+                page.schedule_update()
+            else:
+                page.update()
+        except Exception:
+            pass
 
     # ── Helpers ──
     def show_snack(text: str, is_error: bool = False):
@@ -65,23 +90,49 @@ def main(page: ft.Page):
             duration=3500
         )
         page.overlay.append(snack)
-        page.update()
+        safe_update()
 
     # ── Pickers ──
     def on_folder_selected(e: ft.FilePickerResultEvent):
         if e.path:
             folder_input.value = e.path
             app_state["folder"] = e.path
-            page.update()
+            safe_update()
 
     def on_export_folder_selected(e: ft.FilePickerResultEvent):
         if e.path:
             export_folder_input.value = e.path
-            page.update()
+            safe_update()
 
     folder_picker = ft.FilePicker(on_result=on_folder_selected)
     export_folder_picker = ft.FilePicker(on_result=on_export_folder_selected)
-    page.overlay.extend([folder_picker, export_folder_picker])
+
+    # In Flet < 1.0, non-visual services were required in page.overlay
+    if not hasattr(page, "services"):
+        page.overlay.extend([clipboard, folder_picker, export_folder_picker])
+
+    async def select_folder(_):
+        try:
+            res = folder_picker.get_directory_path("Pilih Folder Dokumen/TXT")
+            if asyncio.iscoroutine(res):
+                path = await res
+                if path:
+                    folder_input.value = path
+                    app_state["folder"] = path
+                    safe_update()
+        except Exception as ex:
+            show_snack(f"Gagal memilih folder: {ex}", is_error=True)
+
+    async def select_export_folder(_):
+        try:
+            res = export_folder_picker.get_directory_path("Pilih Folder Tujuan Simpan")
+            if asyncio.iscoroutine(res):
+                path = await res
+                if path:
+                    export_folder_input.value = path
+                    safe_update()
+        except Exception as ex:
+            show_snack(f"Gagal memilih folder: {ex}", is_error=True)
 
     # ── UI Controls: TAB 1 (Pencarian) ──
     # Check default path: On Android, default to Download folder if it exists
@@ -99,7 +150,7 @@ def main(page: ft.Page):
     btn_browse_folder = ft.IconButton(
         icon=ft.Icons.DRIVE_FILE_MOVE_OUTLINED,
         tooltip="Pilih Folder",
-        on_click=lambda _: folder_picker.get_directory_path("Pilih Folder Dokumen/TXT")
+        on_click=select_folder
     )
 
     kw_input = ft.TextField(
@@ -231,7 +282,7 @@ def main(page: ft.Page):
                 else:
                     status_text.value = f"Memindai... {app_state['done_files']:,} dari {app_state['total_files']:,} file"
 
-                page.update()
+                safe_update()
 
         threading.Thread(target=ui_updater, daemon=True).start()
 
@@ -269,7 +320,7 @@ def main(page: ft.Page):
             apply_filter()
             nav_bar.selected_index = 1
             switch_tab(1)
-            page.update()
+            safe_update()
 
         try:
             engine.search(
@@ -296,7 +347,10 @@ def main(page: ft.Page):
         progress_bar.value = None # indeterminate while starting
         status_text.value = "Memulai mesin pencari..."
         page.update()
-        threading.Thread(target=run_search_thread, daemon=True).start()
+        if hasattr(page, "run_thread"):
+            page.run_thread(run_search_thread)
+        else:
+            threading.Thread(target=run_search_thread, daemon=True).start()
 
     btn_start_search = ft.ElevatedButton(
         "Mulai Pencarian",
@@ -427,8 +481,14 @@ def main(page: ft.Page):
                 )
             )
 
-        def copy_snippet():
-            clipboard.set(result_item["snippet"])
+        async def copy_snippet(_=None):
+            text_to_copy = result_item.get("snippet", "")
+            try:
+                res = clipboard.set(text_to_copy)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                pass
             show_snack("Snippet berhasil disalin ke clipboard!")
 
         dialog = ft.AlertDialog(
@@ -452,7 +512,7 @@ def main(page: ft.Page):
                 width=500
             ),
             actions=[
-                ft.TextButton("Salin Snippet", icon=ft.Icons.COPY_ALL_ROUNDED, on_click=lambda _: copy_snippet()),
+                ft.TextButton("Salin Snippet", icon=ft.Icons.COPY_ALL_ROUNDED, on_click=copy_snippet),
                 ft.ElevatedButton("Tutup", on_click=lambda _: page.pop_dialog())
             ]
         )
@@ -599,7 +659,7 @@ def main(page: ft.Page):
     btn_browse_export = ft.IconButton(
         icon=ft.Icons.FOLDER_OPEN_ROUNDED,
         tooltip="Pilih Folder Tujuan",
-        on_click=lambda _: export_folder_picker.get_directory_path("Pilih Folder Tujuan Simpan")
+        on_click=select_export_folder
     )
 
     export_prog_text = ft.Text("", size=13, color=ft.Colors.SECONDARY)
@@ -624,7 +684,7 @@ def main(page: ft.Page):
             if total > 0:
                 export_prog_bar.value = min(1.0, current / total)
             export_prog_text.value = f"{status} {sub}"
-            page.update()
+            safe_update()
 
         def on_done(res):
             export_prog_bar.visible = False
@@ -645,7 +705,7 @@ def main(page: ft.Page):
                     actions=[ft.ElevatedButton("Tutup", on_click=lambda _: page.pop_dialog())]
                 )
                 page.show_dialog(dialog)
-            page.update()
+            safe_update()
 
         export_split_results(app_state["results"], target_folder, on_progress=on_prog, on_done=on_done)
 
@@ -759,4 +819,10 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    if callable(getattr(ft, "run", None)):
+        ft.run(main)
+    elif callable(getattr(ft, "app", None)):
+        ft.app(target=main)
+    else:
+        import flet.app as ft_app
+        ft_app.run(main)
